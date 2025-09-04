@@ -31,7 +31,7 @@ pipeline {
         //   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
 
           dir("${TF_DIR}") {
-            sh '''
+            sh '''#!/bin/bash
               set -euxo pipefail
               export TF_INPUT=0
               export TF_IN_AUTOMATION=1
