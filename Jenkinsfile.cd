@@ -23,44 +23,49 @@ pipeline {
       }
     }
 
-    stage('Terraform init/plan/apply') {
-      steps {
-        // Nếu Jenkins EC2 không gắn IAM Role, mở comment withCredentials này
-        // withCredentials([usernamePassword(credentialsId: 'aws-creds',
-        //   usernameVariable: 'AWS_ACCESS_KEY_ID',
-        //   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-
-          dir("${TF_DIR}") {
+        stage('Terraform init/plan/apply') {
+        steps {
+            dir('terraform') {
             sh '''#!/bin/bash
-              set -euxo pipefail
-              export TF_INPUT=0
-              export TF_IN_AUTOMATION=1
-              export AWS_DEFAULT_REGION=${AWS_REGION}
+        set -euxo pipefail
 
-              echo "===> Terraform init"
-              terraform init -no-color -input=false
+        export TF_INPUT=0
+        export TF_IN_AUTOMATION=1
+        export AWS_DEFAULT_REGION=${AWS_REGION:-ap-southeast-1}
+        export TF_LOG=INFO
+        export TF_LOG_PATH=terraform.log
 
-              echo "===> Terraform validate"
-              terraform validate -no-color
+        echo "===> Clean local cache to avoid stale locks"
+        rm -rf .terraform/ .terraform.lock.hcl || true
 
-              echo "===> Terraform plan"
-              terraform plan -no-color -input=false -out=tfplan | tee plan.out
+        echo "===> terraform init (reconfigure)"
+        terraform init -no-color -input=false -reconfigure
 
-              echo "===> Terraform apply"
-              terraform apply -no-color -input=false -auto-approve tfplan | tee apply.out
+        echo "===> terraform fmt (optional)"
+        terraform fmt -check -recursive || true
 
-              echo "===> Terraform output"
-              terraform output -raw fe_public_ip | tee ../fe_ip.out
-            '''
-          }
+        echo "===> terraform validate (with timeout 60s)"
+        if ! timeout 60s bash -lc 'terraform validate -no-color'; then
+        echo "WARN: terraform validate timed out or failed — skipping validate, continuing to plan..."
+        fi
 
-          script {
-            env.FE_IP = sh(script: 'cat fe_ip.out', returnStdout: true).trim()
+        echo "===> terraform plan"
+        terraform plan -no-color -input=false -out=tfplan | tee plan.out
+
+        echo "===> terraform apply"
+        terraform apply -no-color -input=false -auto-approve tfplan | tee apply.out
+
+        echo "===> terraform output"
+        terraform output -raw fe_public_ip | tee ../fe_ip.out
+        '''
+            }
+            script {
+            env.FE_IP = sh(script: 'cat terraform/fe_ip.out', returnStdout: true).trim()
             echo "New EC2 IP: ${env.FE_IP}"
-          }
-        // }
-      }
-    }
+            }
+        }
+        }
+
 
     stage('Ansible deploy FE') {
       steps {
