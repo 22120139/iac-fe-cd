@@ -1,0 +1,59 @@
+pipeline {
+  agent any
+  options { timestamps(); ansiColor('xterm') }
+
+  parameters {
+    string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker tag cần deploy')
+  }
+
+  environment {
+    TF_DIR       = 'terraform'
+    ANS_DIR      = 'ansible'
+    DOCKER_IMAGE = 'nzhuy1404/lab01cuakt'  // đổi nếu cần
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Terraform apply') {
+      steps {
+        dir(TF_DIR) {
+          sh 'terraform init -input=false'
+          sh 'terraform apply -input=false -auto-approve'
+          script {
+            env.FE_IP = sh(script: "terraform output -raw fe_public_ip", returnStdout: true).trim()
+          }
+          echo "New EC2 IP: ${env.FE_IP}"
+        }
+      }
+    }
+
+    stage('Ansible deploy FE') {
+      steps {
+        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh',
+                                           keyFileVariable: 'SSH_KEY',
+                                           usernameVariable: 'SSH_USER')]) {
+          dir(ANS_DIR) {
+            sh """
+              ANSIBLE_HOST_KEY_CHECKING=False \
+              ansible-playbook -i "${FE_IP}," \
+                -u ${SSH_USER} --private-key "$SSH_KEY" \
+                -e docker_image=${DOCKER_IMAGE} \
+                -e image_tag=${IMAGE_TAG} \
+                -e app_port=8080 \
+                playbook.yml
+            """
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "App OK: http://${FE_IP}:8080"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+- hosts: all
+  become: true
+  vars:
+    docker_image: "nzhuy1404/lab01cuakt"
+    image_tag: "latest"
+    app_port: 8080
+  tasks:
+    - name: Install Docker
+      apt: { name: docker.io, state: present, update_cache: yes }
+
+    - name: Ensure Docker running
+      systemd: { name: docker, state: started, enabled: yes }
+
+    - name: Pull image
+      command: docker pull {{ docker_image }}:{{ image_tag }}
+
+    - name: Remove old container if exists
+      command: docker rm -f fe
+      ignore_errors: yes
+
+    - name: Run FE container (container listens 2048)
+      command: >
+        docker run -d --name fe --restart=always
+        -p {{ app_port }}:2048
+        {{ docker_image }}:{{ image_tag }}
+
+    - name: Wait for app to be ready
+      shell: "curl -sSf -o /dev/null http://localhost:{{ app_port }}"
+      register: curl_result
+      retries: 20
+      delay: 3
+      until: curl_result.rc == 0

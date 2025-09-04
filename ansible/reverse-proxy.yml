@@ -1,0 +1,30 @@
+---
+- hosts: reverse_proxy
+  become: true
+  vars:
+    domain: "test-app-hoten.khacthienit.click"  # đổi theo domain của bạn
+    fe_ip: "1.2.3.4"                            # Jenkins sẽ override bằng IP mới
+  tasks:
+    - name: Template Nginx site
+      ansible.builtin.template:
+        src: templates/reverse.conf.j2
+        dest: /etc/nginx/sites-available/test-app.conf
+        mode: 0644
+
+    - name: Enable site
+      file:
+        src: /etc/nginx/sites-available/test-app.conf
+        dest: /etc/nginx/sites-enabled/test-app.conf
+        state: link
+        force: true
+
+    - name: Test Nginx config
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+      when: nginx_test.rc == 0
