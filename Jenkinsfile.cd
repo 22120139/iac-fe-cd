@@ -1,6 +1,9 @@
 pipeline {
   agent any
-  options { timestamps() }   // <-- bỏ ansiColor ở đây
+  options {
+    timestamps()               // Ghi log kèm thời gian
+    timeout(time: 30, unit: 'MINUTES')  // Tránh treo vô hạn
+  }
 
   parameters {
     string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker tag cần deploy')
@@ -10,27 +13,63 @@ pipeline {
     TF_DIR       = 'terraform'
     ANS_DIR      = 'ansible'
     DOCKER_IMAGE = 'nzhuy1404/lab01cuakt'
+    AWS_REGION   = 'ap-southeast-1'   // Đổi nếu bạn dùng region khác
   }
 
   stages {
-    stage('Checkout') { steps { checkout scm } }
-
-    stage('Terraform apply') {
+    stage('Checkout') {
       steps {
-        dir(TF_DIR) {
-          sh 'terraform init -input=false'
-          sh 'terraform apply -input=false -auto-approve'
-          script { env.FE_IP = sh(script:"terraform output -raw fe_public_ip", returnStdout:true).trim() }
-          echo "New EC2 IP: ${env.FE_IP}"
-        }
+        checkout scm
+      }
+    }
+
+    stage('Terraform init/plan/apply') {
+      steps {
+        // Nếu Jenkins EC2 không gắn IAM Role, mở comment withCredentials này
+        // withCredentials([usernamePassword(credentialsId: 'aws-creds',
+        //   usernameVariable: 'AWS_ACCESS_KEY_ID',
+        //   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+
+          dir("${TF_DIR}") {
+            sh '''
+              set -euxo pipefail
+              export TF_INPUT=0
+              export TF_IN_AUTOMATION=1
+              export AWS_DEFAULT_REGION=${AWS_REGION}
+
+              echo "===> Terraform init"
+              terraform init -no-color -input=false
+
+              echo "===> Terraform validate"
+              terraform validate -no-color
+
+              echo "===> Terraform plan"
+              terraform plan -no-color -input=false -out=tfplan | tee plan.out
+
+              echo "===> Terraform apply"
+              terraform apply -no-color -input=false -auto-approve tfplan | tee apply.out
+
+              echo "===> Terraform output"
+              terraform output -raw fe_public_ip | tee ../fe_ip.out
+            '''
+          }
+
+          script {
+            env.FE_IP = sh(script: 'cat fe_ip.out', returnStdout: true).trim()
+            echo "New EC2 IP: ${env.FE_IP}"
+          }
+        // }
       }
     }
 
     stage('Ansible deploy FE') {
       steps {
-        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
-          dir(ANS_DIR) {
+        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh',
+                                           keyFileVariable: 'SSH_KEY',
+                                           usernameVariable: 'SSH_USER')]) {
+          dir("${ANS_DIR}") {
             sh """
+              set -euxo pipefail
               ANSIBLE_HOST_KEY_CHECKING=False \
               ansible-playbook -i "${FE_IP}," \
                 -u ${SSH_USER} --private-key "$SSH_KEY" \
@@ -46,6 +85,14 @@ pipeline {
   }
 
   post {
-    success { echo "App OK: http://${FE_IP}:8080" }
+    success {
+      echo "✅ App deployed successfully: http://${FE_IP}:8080"
+    }
+    failure {
+      echo "❌ Pipeline failed. Check logs for details."
+    }
+    always {
+      echo "📜 Build finished at: ${new Date()}"
+    }
   }
 }
