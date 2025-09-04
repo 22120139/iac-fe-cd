@@ -1,6 +1,6 @@
 pipeline {
   agent any
-  options { timestamps(); ansiColor('xterm') }
+  options { timestamps() }   // <-- bỏ ansiColor ở đây
 
   parameters {
     string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker tag cần deploy')
@@ -9,22 +9,18 @@ pipeline {
   environment {
     TF_DIR       = 'terraform'
     ANS_DIR      = 'ansible'
-    DOCKER_IMAGE = 'nzhuy1404/lab01cuakt'  // đổi nếu cần
+    DOCKER_IMAGE = 'nzhuy1404/lab01cuakt'
   }
 
   stages {
-    stage('Checkout') {
-      steps { checkout scm }
-    }
+    stage('Checkout') { steps { checkout scm } }
 
     stage('Terraform apply') {
       steps {
         dir(TF_DIR) {
           sh 'terraform init -input=false'
           sh 'terraform apply -input=false -auto-approve'
-          script {
-            env.FE_IP = sh(script: "terraform output -raw fe_public_ip", returnStdout: true).trim()
-          }
+          script { env.FE_IP = sh(script:"terraform output -raw fe_public_ip", returnStdout:true).trim() }
           echo "New EC2 IP: ${env.FE_IP}"
         }
       }
@@ -32,9 +28,7 @@ pipeline {
 
     stage('Ansible deploy FE') {
       steps {
-        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh',
-                                           keyFileVariable: 'SSH_KEY',
-                                           usernameVariable: 'SSH_USER')]) {
+        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh', keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
           dir(ANS_DIR) {
             sh """
               ANSIBLE_HOST_KEY_CHECKING=False \
@@ -52,8 +46,6 @@ pipeline {
   }
 
   post {
-    success {
-      echo "App OK: http://${FE_IP}:8080"
-    }
+    success { echo "App OK: http://${FE_IP}:8080" }
   }
 }

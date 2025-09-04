@@ -2,7 +2,7 @@
 - hosts: reverse_proxy
   become: true
   vars:
-    domain: "test-app-hoten.khacthienit.click"  # đổi theo domain của bạn
+    domain: "test-app-vanhuy.khacthienit.click"  # đổi theo domain của bạn
     fe_ip: "1.2.3.4"                            # Jenkins sẽ override bằng IP mới
   tasks:
     - name: Template Nginx site
